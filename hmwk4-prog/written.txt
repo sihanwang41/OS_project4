@@ -1,0 +1,110 @@
+Shanlongchaun Gu (sg3208)
+Andrew Kallem (ajk2214)
+Sihan Wang (sw2921)
+CS 4118 - Operating Systems
+Homework 4, Programming Problems
+Part 3: Investigation and Benchmarking
+
+
+Apps
+====
+We used the following apps for our main investigation/experiments:
+- Pi - https://play.google.com/store/apps/details?id=com.gg.pi&hl=en
+- Candy Crush Saga - https://play.google.com/store/apps/details?id=com.king.candycrushsaga&hl=en
+- Google Chrome browser - built-in on device
+
+We also did some informal experiments with the following apps, but the results were not different from our main experiments in any meaningful way:
+- Geekbench 3 - https://play.google.com/store/apps/details?id=com.primatelabs.geekbench&hl=ena
+- Quadrant Standard - https://play.google.com/store/apps/details?id=com.aurorasoftworks.quadrant.ui.standard&hl=en
+- AVG Antivirus Free - https://play.google.com/store/apps/details?id=com.antivirus&hl=en
+- Adobe Photoshop - https://play.google.com/store/apps/details?id=com.adobe.psmobile&hl=en
+
+
+Testing Process
+===============
+Make test.c and install the executable on the device with "adb push test /data/misc".
+
+Set n CPUs to the foreground group (and 4-n CPUs to the background group) by running "adb /data/misc/test n 1", replacing n with the number of CPUs for the foreground group.
+
+In all experiments, force close all other apps running on the device before starting the experiment.
+
+At various times during the experiments (described below), look at the scheduler debug output by running "adb shell cat /proc/sched_debug".
+
+In general, our experiments focused on foreground tasks, because that is where performance differences are most visible (we can actually see it).
+
+
+Workload 1
+==========
+In this workload, we simply calculate 10 million digits of pi using the Pi program in the foreground.  We investigate whether and how much assigning more CPUs to foreground tasks improves performance.  We also compare versus the default scheduler.
+
+Steps:
+- Assign n CPUs to foreground tasks (see Testing Process above)
+- Run the Pi app, leaving it in the foreground
+- In the Pi app, select the option to calculate 10 million digits
+
+Results:
+The results are the time it took to calculate 10 million digits of pi as reported by the app itself.
+	   	# CPUs in
+Scheduler	foreground group	Time (secs)
+---------------------------------------------------
+Ours			1		102
+Ours			2		56
+Ours			3		43
+Default			N/A		41
+
+Discussion:
+Having more CPUs in the foreground group does make the calculation faster, but the difference between 1 and 3 CPUs is not a 3x speed-up.
+
+The first question is, if we are running just one app, why is there *any* speed-up at all from 1 to 3 CPUs?  The reason is that the Pi app launches multiple threads to perform the calculation.  (Viewing the scheduler debug output at any point during the calculation shows multiple threads in execution.)  All of these threads are in the foreground group, so the more CPUs there are in the foreground group, the more they can execute in parallel.
+
+The second question is, why is the speed-up from 1 to 3 CPUs much less than 3x?  We believe this is because the threads launched by the Pi app are not fully parallelizable (due to the nature of the calculation).  Having multiple CPUs provides a performance boost only when the threads actually can run concurrently, but it appears that in calculating pi, that is not very often.
+
+
+Workload 2
+==========
+In this workload, we investigate the qualitative performance of a popular game, Candy Crush Saga, depending on the number of foreground CPUs.
+
+Steps:
+- Assign n CPUs to foreground tasks (see Testing Process above)
+- Run Candy Crush Saga, leaving it in the foreground
+- Play a round of the game
+
+Results:
+With 1 CPU for foreground tasks, we observe some stuttering of the animation on the home page of the game.  With 2 CPUs in the foreground group, the stuttering on the home page was reduced, and with 3 CPUs in the foreground group, it was reduced even further.
+
+Playing the game itself, we did not notice any qualitative difference.
+
+Discussion:
+Using the scheduler debug output while the game is running, we see only one process.  Thus, while playing the game, it does not benefit from additional CPUs.
+
+However, during loading and the home screen, we do see many other processes in the foreground.  The names of the processes are not particularly revealing, but we suspect these represent various processes the game or Android invoke, and having multiple CPUs for the foreground group would make them complete faster.  These processes either terminate or sleep once the game actually starts, since they are no longer in the runqueue at that point.
+
+
+Workload 3
+==========
+In this workload, we investigate the qualitative performance of "regular" usage of the device such as web browsing, browsing the Google Play store, and changing device settings, depending on the number of foreground CPUs. 
+
+Steps:
+- Assign n CPUs to foreground tasks (see Testing Process above)
+- Open several tabs in Google Chrome for different sites.  Navigate various links, switching back and forth between tabs
+- Open the Google Play app and browse the top listings
+- Open the settings app and navigate through the menus
+
+Results:
+With 1 CPU in the foreground group, the two tabs in Chrome are very noticeably sluggish.  The scrolling animation stutters, switching tabs is slow, and UI buttons are slow to register tabs.  By contrast, with 3 CPUs in the foreground group, the experience is smoother.
+
+We did not notice any significant qualitative difference in performance when interacting with the Google Play app or the Settings app.
+
+Discussion:
+It is well-known that Google Chrome launches separate processes for each browser tab; thus, if we quickly navigate between different tabs, we expect having more CPUs in the foreground group will benefit performance, and we see this in practice.
+
+While investigating the scheduler debug output during our interactions, we notice the android.ui process is often in the runqueue.  We suspect this process is responsible for managing and rendering standard components of the Android UI (such as buttons, the back and home button, etc.)  Since our scheduler is round-robin, when there are many processes in the same runqeue as android.ui, the android.ui process can wait for a while before executing.  This explains the UI lagginess we observed.  With 3 CPUs in the foreground group, android.ui round robins to the front of its queue faster, making the UI feel more responsive.
+
+The reason we did not see any difference in performance for Google Play or the Settings app is that they are not multi-threaded, so they could not benefit from multiple CPUs.
+
+We also ran this experiment using the default CFS scheduler.  In this case, Chrome appeared to be even slightly more responsive and smooth versus our scheduler with 3 CPUs in the foreground group.  That's because android.ui executes infrequently (only in response to a user event), so it would have a low vruntime and execute almost immediately when it become runnable, making the UI more responsive.
+
+
+Final Note
+==========
+In general, the UI should always feel at least as responsive and smooth under the default CFS as our GRR scheduler, regardless of the number of CPUs we assign to the foreground group.  The reason is that under CFS, when a UI event occurs and the UI handling process becomes runnable, it will have a very low vruntime, most likely the lowest in the CFS runqueue.  Consequently, it will be the very next thing to run, and the UI will feel responsive.  By contrast, under GRR, when a UI event occurs and the UI handling process becomes runnable, it will be enqueued at the back of the GRR queue for one of the foreground CPUs.  If the GRR queue has many processes ahead of it, the UI handling process will not run for some time (100ms x the number of processes ahead on the GRR queue), and thus the UI will feel laggy and unresponsive.

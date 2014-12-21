@@ -1,0 +1,33 @@
+Shanlongchaun Gu (sg3208)
+Andrew Kallem (ajk2214)
+Sihan Wang (sw2921)
+CS 4118 - Operating Systems
+Homework 4, Programming Problems
+
+
+Notes on our implementation:
+Our implementation uses a simple linked list to track the tasks on the queue.  Tasks at the head will be run, and tasks are enqeueued at the tail.
+
+To monitor and respond to changes in a process's cgroup, we created a new class method, cgroup_attach.  We used a class method because, at least in principle, other schedulers besides ours might want to hook into events when a process's cgroup changes.  However, when a cpu's group changes due to the system call, we call a function in our GRR scheduler class *directly*.  That's because the system call is defined only for our GRR groups, so it cannot be relevant to other scheduling classes.
+
+When searching for the shortest or longest GRR runqueue (i.e., for picking a runqueue or for load balancing), we do so without locking the GRR runqueues, since for each one we are simply reading an int variable to determine how many tasks are on it.  The GRR runqueue we end up picking as the shortest and longest may not be fully accurate then, since we measured each one at a slightly different time, but as we learned in class, this is acceptable for load balancing purposes because it avoids contention on the lock.
+
+We modified debug.c to print out only information relevant to our scheduler, including the linked list of tasks on our GRR runqueue.
+
+We started working on the group scheduling when part 1 was mostly but not entirely complete.  Therefore there is no specific commit in our commit history that corresponds directly to part 1 of the HW.  Obviously, though, to complete part 2, we essentially completed part 1, we just overlapped our work a bit.
+
+We always use the lower CPU numbers for the foreground group and the higher CPU numbers for the background group.  For example, if we have 3 foreground CPUs, they will be numbers 0, 1, and 2.
+
+Our test program, test.c, takes as command-line arguments the same parameters as the system call and then calls it.  For example, "adb shell /data/misc test 2 1" will set 2 CPUs to the foreground group (and therefore 2 to the background group).
+
+Please see the written.txt file for the results of our investigation (part 3 of the HW).
+
+
+Notes on team collaboration:
+We did the vast majority of the coding as a team together in person.  You may notice that most of the commts are under Andrew's name, which is simply because we used his computer when we worked together in person.
+
+
+Citations:
+http://www.criticalblue.com/news/wp-content/uploads/2013/12/linux_scheduler_notes_final.pdf
+http://en.wikipedia.org/wiki/Cgroups
+flo-kernel/Documentation/cgroups (various files)
